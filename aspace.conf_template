@@ -1,0 +1,7 @@
+aspace {
+  url="url,
+  repoId = 0,
+  csvFilename = "output.csv",
+  username = "username",
+  password = "password"
+}
