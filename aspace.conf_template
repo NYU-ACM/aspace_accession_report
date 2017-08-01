@@ -1,5 +1,5 @@
 aspace {
-  url="url,
+  url="url",
   repoId = 0,
   csvFilename = "output.csv",
   username = "username",
