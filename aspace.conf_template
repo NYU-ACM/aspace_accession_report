@@ -1,7 +1,5 @@
 aspace {
-  url="url",
-  repoId = 0,
-  csvFilename = "output.csv",
+  url="aspace-url",
   username = "username",
   password = "password"
 }

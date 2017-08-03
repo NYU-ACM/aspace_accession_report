@@ -1,0 +1,9 @@
+project/project/*
+project/target/*
+target/*
+src/main/resources/application.conf
+.idea/*
+*.csv
+*.log
+aspace.conf
+*.jar

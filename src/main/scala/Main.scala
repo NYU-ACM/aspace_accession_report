@@ -27,10 +27,8 @@ object Main extends App {
 
   implicit val formats = DefaultFormats
 
-  val config = ConfigFactory.parseFile(new File("aspace.conf"));
   val cli = new ScallopCLI(args)
-  var errors = 0
-  var success = 0
+  val config = getConfig()
 
   var accConfig = new AccConfig(
     cli.repositoryId(),
@@ -43,18 +41,27 @@ object Main extends App {
     HttpClients.createDefault())
 
   accConfig.key = getKey()
+  var errors = 0
+  var success = 0
+
   accConfig.csvWriter.write("\"id1\",\"id2\",\"id3\",\"id4\",\"title\",\"accession_date\",\"extent_num\",\"extent_type\"\n")
   accConfig.csvWriter.flush()
 
   val accessions = getAccessions()
   println(s"Exporting ${accessions.size} accessions")
 
-  accessions.foreach{ i =>
-    getAccession(i)
-  }
+  accessions.foreach{ i => getAccession(i) }
 
   println("export complete")
   println(s"export completed, $success records exported successfully, $errors errors")
+
+  def getConfig(): com.typesafe.config.Config = {
+    val configFile = new File("aspace.conf")
+    configFile.exists match {
+      case true => ConfigFactory.parseFile(configFile)
+      case false => ConfigFactory.load()
+    }
+  }
 
   def getKey(): Option[String] = {
     println("getting key")
