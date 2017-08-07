@@ -6,6 +6,7 @@ import com.typesafe.config.ConfigFactory
 import java.net.URI
 import java.io.File
 
+import edu.nyu.libraries.acm.Main.accConfig
 import org.apache.http.client.methods.{HttpGet, RequestBuilder}
 import org.apache.http.conn.HttpHostConnectException
 import org.apache.http.impl.client.{CloseableHttpClient, HttpClients}
@@ -14,15 +15,10 @@ import org.json4s._
 import org.json4s.jackson.JsonMethods._
 import org.rogach.scallop.{ScallopConf, ScallopOption}
 
-class ScallopCLI(arguments: Seq[String]) extends ScallopConf(arguments) {
-  val repositoryId = opt[Int](required = true)
-  val fy = opt[Int]()
-  verify()
-}
+case class AccConfig(repositoryId: Int, username: String, password: String, aspaceUrl: String, var key: Option[String], aspaceClient: CloseableHttpClient);
+case class Accessions(count: Int, success: Int, errors: Int)
 
-case class AccConfig(repositoryId: Int, username: String, password: String, aspaceUrl: String, csvWriter: FileWriter, errorWriter: FileWriter, var key: Option[String], aspaceClient: CloseableHttpClient);
-
-object Main extends App {
+object Main extends App with WriterSupport {
   val header = "X-ArchivesSpace-Session"
 
   implicit val formats = DefaultFormats
@@ -35,25 +31,26 @@ object Main extends App {
     config.getString("aspace.username"),
     config.getString("aspace.password"),
     config.getString("aspace.url"),
-    new FileWriter(new File("output.csv")),
-    new FileWriter(new File("error.log")),
     None,
     HttpClients.createDefault())
 
-  accConfig.key = getKey()
-  var errors = 0
-  var success = 0
+  getKey() match {
+    case key: Some[String] => accConfig.key = key
+    case None => {
+      System.err.println("Cannot connect to ArchivesSpace, exiting");
+      System.exit(1)
+    }
+  }
 
-  accConfig.csvWriter.write("\"id1\",\"id2\",\"id3\",\"id4\",\"title\",\"accession_date\",\"extent_num\",\"extent_type\"\n")
-  accConfig.csvWriter.flush()
 
-  val accessions = getAccessions()
+  val accessions = getAccessionIds()
+
   println(s"Exporting ${accessions.size} accessions")
 
-  accessions.foreach{ i => getAccession(i) }
+  val results = getAccessions(0, 0, 0)
 
   println("export complete")
-  println(s"export completed, $success records exported successfully, $errors errors")
+  println(s"export completed, ${results.success} records exported successfully, ${results.errors} errors")
 
   def getConfig(): com.typesafe.config.Config = {
     val configFile = new File("aspace.conf")
@@ -77,15 +74,14 @@ object Main extends App {
       response.close()
       Some(askey)
     } catch {
-      case h: HttpHostConnectException => {
-        System.err.println("Cannot connect to ArchivesSpace, Exiting");
-        accConfig.errorWriter.write("Cannot connect to ArchivesSpace, Exiting");
+      case e: Exception => {
+        errorWriter.write(s"Cannot connect to ArchivesSpace\n$e");
         None
       }
     }
   }
 
-  def getAccessions(): List[Int] = {
+  def getAccessionIds(): List[Int] = {
     println("getting list of accessions")
     val accUrl = s"/repositories/${accConfig.repositoryId}/accessions"
 	  val get = new HttpGet(accConfig.aspaceUrl + accUrl + "?all_ids=true")
@@ -101,9 +97,9 @@ object Main extends App {
 	  accs
   }
 
-  def getAccession(id: Int) {
+  def getAccessions(count: Int, success: Int, errors: Int): Accessions = {
       val accUrl = s"/repositories/${accConfig.repositoryId}/accessions"
-      val get = new HttpGet(accConfig.aspaceUrl + accUrl + "/" + id)
+      val get = new HttpGet(accConfig.aspaceUrl + accUrl + "/" + accessions(count))
       get.addHeader(header, accConfig.key.get)
       val response = accConfig.aspaceClient.execute(get)
       val entity = response.getEntity
@@ -122,18 +118,24 @@ object Main extends App {
       val extents = json \ "extents"
       val num = (extents(0) \ "number").extract[String].toDouble
       val extentType = (extents(0) \ "extent_type").extract[String]
-      accConfig.csvWriter.write("\"" + getString(id0) + "\",\"" + getString(id1) + "\",\"" + getString(id2) + "\",\"" + getString(id3) + "\",\"" +  title + "\",\"" + aDate + "\",\"" + num + "\",\"" + extentType + "\"\n")
-      accConfig.csvWriter.flush()
+      csvWriter.write(s"\"${getString(id0)}\",\"${getString(id1)}\",\"${getString(id2)}\",\"${getString(id3)}\",\"$title\",\"$aDate\",\"$num\",\"$extentType\"\n")
+      csvWriter.flush()
       EntityUtils.consume(entity)
       response.close()
-      success = success + 1
 
+      count == accessions.size - 1 match {
+        case true => Accessions(count, success + 1, errors)
+        case false => getAccessions(count +1, success + 1, errors)
+      }
 	  } catch {
-	    case e: Exception => {
-        accConfig.errorWriter.write(s"$title_err \n")
+      case e: Exception => {
+        errorWriter.write(s"$title_err \n")
         EntityUtils.consume(entity)
         response.close()
-        errors = errors + 1
+        count == accessions.size - 1 match {
+          case true => Accessions(count, success, errors + 1)
+          case false => getAccessions(count +1, success, errors + 1)
+        }
       }
 	  }
   }
@@ -147,3 +149,17 @@ object Main extends App {
   }
 
 }
+
+trait WriterSupport {
+  val errorWriter = new FileWriter(new File("errors.log"))
+  val csvWriter = new FileWriter(new File("output.csv"))
+  csvWriter.write("\"id1\",\"id2\",\"id3\",\"id4\",\"title\",\"accession_date\",\"extent_num\",\"extent_type\"\n")
+  csvWriter.flush()
+}
+
+class ScallopCLI(arguments: Seq[String]) extends ScallopConf(arguments) {
+  val repositoryId = opt[Int](required = true)
+  val fy = opt[Int]()
+  verify()
+}
+
